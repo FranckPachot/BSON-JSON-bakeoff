@@ -7,11 +7,18 @@ sleep 30
 java -jar ./target/insertTest-1.0-jar-with-dependencies.jar $*
 docker rm -f db
 
-# PostgreSQL
+# PostgreSQL JSON
 docker run --name db --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=password postgres
 sleep 15
 until echo "create database test;" | docker exec -i db psql -U postgres ; do sleep 15 ; done
 java -jar ./target/insertTest-1.0-jar-with-dependencies.jar -p $*
+docker rm -f db
+
+# PostgreSQL JSONB
+docker run --name db --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=password postgres
+sleep 15
+until echo "create database test;" | docker exec -i db psql -U postgres ; do sleep 15 ; done
+java -jar ./target/insertTest-1.0-jar-with-dependencies.jar -p -j $*
 docker rm -f db
 
 # YugabyteDB
