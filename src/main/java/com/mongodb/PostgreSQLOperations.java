@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
+import java.sql.Array;
+
 
 import org.json.JSONObject;
 import org.postgresql.util.PGobject;
@@ -42,7 +44,7 @@ public class PostgreSQLOperations implements DatabaseOperations {
             for (String collectionName : collectionNames) {
                 dropStmt = connection.prepareStatement(String.format("DROP TABLE IF EXISTS %s", collectionName));
     
-                createStmt = connection.prepareStatement(String.format("CREATE %s TABLE %s  (id SERIAL PRIMARY KEY, data %s, indexArray TEST[])"
+                createStmt = connection.prepareStatement(String.format("CREATE %s TABLE %s  (id SERIAL PRIMARY KEY, data %s, indexArray TEXT[])"
                     , isYugabyteDB ? "" : "UNLOGGED", collectionName, Main.jsonType)
                  )                ;
 
@@ -77,69 +79,67 @@ public class PostgreSQLOperations implements DatabaseOperations {
     }
 
     @Override
-    public long insertDocuments(String collectionName, List<JSONObject> documents, int dataSize, boolean splitPayload) {
-        String sql = "INSERT INTO " + collectionName + " (data, indexarray) VALUES (?, ?)";
-        
-        for (int i = 1; i < Main.batchSize; i++)
-            sql = sql + ",(?, ?)";
-        
-        try {
-            stmt = connection.prepareStatement(sql);
-            int batchCount = 0;
-            byte[] bytes = new byte[dataSize];
-            rand.nextBytes(bytes);
-
-            List<String> indexAttrs = new ArrayList<>();
-            JSONObject dataJson = new JSONObject();
-            if (splitPayload) {
-                dataJson.clear();
-                int length = dataSize / Main.numAttrs;
-                for (int i = 0; i < Main.numAttrs; i++) {
-                    int start = i * length;
-                    dataJson.put("data" + i, Arrays.copyOfRange(bytes, start, start + length));
-                }
-            } else {
-                dataJson.put("data", bytes);
-            }
-            
-            long startTime = System.currentTimeMillis();
-            int setIdx = 0;
-            PGobject pgo = new PGobject();
-            pgo.setType(Main.jsonType);
-            
-            for (JSONObject json : documents) {
-                json.put("payload", dataJson);
-                setIdx++;
-                
-                pgo.setValue(json.toString());
-                stmt.setObject(setIdx, pgo);
-                json.remove("payload");
-                
-                for (int i = 0; i < 10; i++) {
-                    indexAttrs.add(documents.get(rand.nextInt(documents.size())).getString("id"));
-                }
-                
-                setIdx++;
-                stmt.setObject(setIdx, indexAttrs.stream().toArray());
-                
-                if (setIdx == Main.batchSize * 2) {
-                    stmt.execute();
-                    setIdx = 0;
-                }
-                
-                indexAttrs.clear();
-            }
-
-            if (batchCount > 0) {
-                stmt.executeBatch();  // Execute remaining batch if any
-            }
-
-            return System.currentTimeMillis() - startTime;
-        } catch (SQLException e) {
-            e.printStackTrace();
-            return -1;
-        }
+public long insertDocuments(String collectionName, List<JSONObject> documents, int dataSize, boolean splitPayload) {
+    // Prepare SQL statement
+    String sql = "INSERT INTO " + collectionName + " (data, indexarray) VALUES (?, ?)";
+    for (int i = 1; i < Main.batchSize; i++) {
+        sql += ", (?, ?)";
     }
+    
+    try {
+        stmt = connection.prepareStatement(sql);
+        int setIdx = 0;
+        byte[] bytes = new byte[dataSize];
+        rand.nextBytes(bytes);
+        
+        JSONObject dataJson = new JSONObject();
+        if (splitPayload) {
+            dataJson.clear();
+            int length = dataSize / Main.numAttrs;
+            for (int i = 0; i < Main.numAttrs; i++) {
+                dataJson.put("data" + i, Arrays.copyOfRange(bytes, i * length, (i + 1) * length));
+            }
+        } else {
+            dataJson.put("data", bytes);
+        }
+        
+        long startTime = System.currentTimeMillis();
+        PGobject pgo = new PGobject();
+        pgo.setType(Main.jsonType);
+        for (JSONObject json : documents) {            
+            json.put("payload", dataJson);
+            pgo.setValue(json.toString());
+            
+            stmt.setObject(++setIdx, pgo);  // Set `data` parameter
+            json.remove("payload");
+            
+            List<String> indexAttrs = new ArrayList<>();
+            for (int i = 0; i < 10; i++) {
+                indexAttrs.add(documents.get(rand.nextInt(documents.size())).getString("id"));
+            }
+            
+            String[] indexArray = indexAttrs.toArray(new String[0]);
+            Array sqlArray = connection.createArrayOf("text", indexArray);
+            
+            stmt.setArray(++setIdx, sqlArray);  // Set `indexarray` parameter
+            
+            // Check if we've reached the batch size limit
+            if (setIdx / 2 == Main.batchSize) {
+                stmt.executeBatch();  // Execute and clear batch
+                setIdx = 0;           // Reset the index counter
+            }
+        }
+        // Execute any remaining statements in the batch
+        if (setIdx > 0) {
+            stmt.executeBatch();
+        }
+        
+        return System.currentTimeMillis() - startTime;
+    } catch (SQLException e) {
+        e.printStackTrace();
+        return -1;
+    }
+}
     
     @Override
     public int queryDocumentsById(String collectionName, String id) {
