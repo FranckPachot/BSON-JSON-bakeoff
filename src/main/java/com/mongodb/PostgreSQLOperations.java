@@ -42,7 +42,7 @@ public class PostgreSQLOperations implements DatabaseOperations {
             for (String collectionName : collectionNames) {
                 dropStmt = connection.prepareStatement(String.format("DROP TABLE IF EXISTS %s", collectionName));
     
-                createStmt = connection.prepareStatement(String.format("CREATE %s TABLE %s  (id SERIAL PRIMARY KEY, data %s, indexArray STRING[])"
+                createStmt = connection.prepareStatement(String.format("CREATE %s TABLE %s  (id SERIAL PRIMARY KEY, data %s, indexArray TEST[])"
                     , isYugabyteDB ? "" : "UNLOGGED", collectionName, Main.jsonType)
                  )                ;
 
